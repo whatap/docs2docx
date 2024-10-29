@@ -151,7 +151,7 @@ tqdm==4.66.3
 trio==0.22.2
 trio-websocket==0.11.1
 trove-classifiers==2024.5.22
-Twisted==22.10.0
+Twisted==24.7.0
 typing_extensions==4.12.2
 tzdata==2024.1
 urllib3==2.0.7
