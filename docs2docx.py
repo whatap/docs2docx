@@ -2,6 +2,8 @@ import requests
 from bs4 import BeautifulSoup, NavigableString, Tag
 from docx import Document
 from docx.shared import Inches
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 from io import BytesIO
 from PIL import Image as PILImage
 import re
@@ -11,10 +13,10 @@ def clean_text(text):
     """주어진 텍스트에서 특수 문자를 제거하고 원하는 문자열로 치환합니다."""
     if text:
         # NULL 바이트 및 제어 문자 제거
-        text = re.sub(r'[\x00-\x1F\x7F]', '', text).replace('â', ' ').strip()
+        text = re.sub(r'[\x00-\x1F\x7F]', '', text)
         # 문자열 치환 추가
-        text = text.replace('â', '○').replace('â', '✕')
-        return text
+        text = text.replace('â', ' ').replace('â', '○').replace('â', '✕')
+        return text.strip()
     return ""
 
 def fetch_and_convert(urls):
@@ -64,9 +66,9 @@ def parse_element(element, doc):
         heading_text = clean_text(element.get_text(strip=True))
         doc.add_heading(heading_text, level=level)
     elif element.name == 'p':
-        paragraph_text = clean_text(element.get_text(strip=True))
-        if paragraph_text:
-            doc.add_paragraph(paragraph_text)
+        # 새로운 단락 생성
+        paragraph = doc.add_paragraph()
+        parse_p_element(element, paragraph)
     elif element.name == 'ul':
         # 리스트 처리
         for li in element.find_all('li', recursive=False):
@@ -93,10 +95,10 @@ def parse_element(element, doc):
         summary = element.find('summary')
         if summary:
             summary_text = clean_text(summary.get_text(strip=True))
-            doc.add_paragraph(f"Details: {summary_text}", style='Intense Quote')
-            details_content = element.find_all('p')
-            for p in details_content:
-                parse_element(p, doc)
+            doc.add_paragraph(f"Details: {summary_text}", style='Quote')  # 스타일 변경
+            for child in element.children:
+                if child != summary:
+                    parse_element(child, doc)
     elif element.name == 'img':
         # 이미지 처리
         img_src = element.get('src')
@@ -115,6 +117,30 @@ def parse_element(element, doc):
         # 기타 요소의 경우 하위 요소를 재귀적으로 처리
         for child in element.children:
             parse_element(child, doc)
+
+def parse_p_element(element, paragraph):
+    """<p> 태그의 내용을 처리하여 단락에 추가합니다."""
+    for child in element.children:
+        if isinstance(child, NavigableString):
+            text = clean_text(str(child))
+            if text:
+                # 이전 텍스트와의 공백 처리
+                if paragraph.text and not paragraph.text.endswith(' '):
+                    text = ' ' + text
+                paragraph.add_run(text)
+        elif child.name == 'a':
+            text = clean_text(child.get_text())
+            href = child.get('href', '')
+            if text:
+                # 이전 텍스트와의 공백 처리
+                if paragraph.text and not paragraph.text.endswith(' '):
+                    text = ' ' + text
+                run = paragraph.add_run(text)
+                # 하이퍼링크 스타일 적용 가능
+                # 하이퍼링크 기능을 구현하려면 추가 작업이 필요합니다.
+        else:
+            # 다른 태그가 있을 경우 재귀적으로 처리
+            parse_p_element(child, paragraph)
 
 def process_table(table_element, doc):
     """HTML 테이블 요소를 Word 문서에 추가합니다."""
@@ -151,27 +177,15 @@ def process_table(table_element, doc):
             rowspan = int(cell.get('rowspan', 1))
             colspan = int(cell.get('colspan', 1))
 
-            # 셀 내부의 HTML을 파싱하여 이모지 변환 및 텍스트 추출
-            cell_html = str(cell)
-            cell_soup = BeautifulSoup(cell_html, 'html.parser')
-
-            # 이모지 변환 처리
-            for emoji_span in cell_soup.find_all('span', class_='emoji-ok'):
-                emoji_span.replace_with('○')
-            for emoji_span in cell_soup.find_all('span', class_='emoji-no'):
-                emoji_span.replace_with('✕')
-
-            # 추가적인 문자열 치환
-            cell_text = clean_text(cell_soup.get_text(strip=True))
-
-            # 셀에 텍스트 추가
+            # 셀에 텍스트 및 이미지 추가
             if len(table.rows) <= row_idx:
                 table.add_row()
             while len(table.rows[row_idx].cells) < max_cols:
                 table.rows[row_idx].add_cell('')
 
             table_cell = table.cell(row_idx, col_idx)
-            table_cell.text = cell_text
+            # 셀 내용 처리
+            parse_table_cell(cell, table_cell)
 
             # 셀 병합 처리
             if rowspan > 1 or colspan > 1:
@@ -189,11 +203,42 @@ def process_table(table_element, doc):
                     while len(grid_row) <= col_idx + j:
                         grid_row.append(None)
                     if i == 0 and j == 0:
-                        grid_row[col_idx + j] = cell_text
+                        grid_row[col_idx + j] = 'data'
                     else:
                         grid_row[col_idx + j] = 'skip'
             col_idx += colspan
         row_idx += 1
+
+def parse_table_cell(cell_element, table_cell):
+    """테이블 셀의 내용을 처리하여 Word 셀에 추가합니다."""
+    # 기존 셀의 텍스트를 초기화
+    table_cell.text = ''
+    # 셀에 Paragraph 추가
+    paragraph = table_cell.paragraphs[0]
+    for child in cell_element.children:
+        if isinstance(child, NavigableString):
+            text = clean_text(str(child))
+            if text:
+                paragraph.add_run(text)
+        elif child.name == 'img':
+            img_src = child.get('src')
+            if img_src:
+                if not img_src.startswith('http'):
+                    img_src = 'https://docs.whatap.io' + img_src
+                try:
+                    img_data = requests.get(img_src).content
+                    img = PILImage.open(BytesIO(img_data))
+                    img.save("temp_table_image.png")
+                    run = paragraph.add_run()
+                    run.add_picture("temp_table_image.png", width=Inches(1))
+                    os.remove("temp_table_image.png")
+                except Exception as e:
+                    print(f"Failed to load image {img_src}: {e}")
+        elif child.name == 'br':
+            paragraph.add_run('\n')
+        else:
+            # 기타 요소 처리
+            parse_table_cell(child, table_cell)
 
 def ensure_table_size(table, row_idx, col_idx):
     """테이블의 크기를 조정하여 특정 행과 열에 접근 가능하도록 합니다."""
