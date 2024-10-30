@@ -3,3 +3,5 @@ output.docx
 content.txt
 bak-urls.txt
 content.html
+/dist
+/build

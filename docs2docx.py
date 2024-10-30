@@ -1,7 +1,7 @@
 import requests
 from bs4 import BeautifulSoup, NavigableString
 from bs4.element import Tag  # Tag 클래스를 직접 임포트
-import docx  # 추가된 임포트
+import docx
 from docx import Document
 from docx.shared import Inches
 from docx.oxml import OxmlElement  # 추가된 임포트
@@ -11,6 +11,8 @@ from PIL import Image as PILImage
 import re
 import os
 import base64
+import sys
+import argparse  # 추가된 임포트
 
 def clean_text(text):
     """주어진 텍스트에서 특수 문자를 제거하고 원하는 문자열로 치환합니다."""
@@ -360,7 +362,25 @@ def merge_cell(table, row_idx, col_idx, rowspan, colspan):
     start_cell.merge(end_cell)
 
 # URL 목록 읽기
-with open('urls.txt', 'r') as file:
-    urls = [line.strip() for line in file if line.strip()]
+# with open('urls.txt', 'r') as file:
+#     urls = [line.strip() for line in file if line.strip()]
 
-fetch_and_convert(urls)  # 함수 호출
+# fetch_and_convert(urls)  # 함수 호출
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Fetch URLs from a file and convert to Word document.')
+    parser.add_argument('filename', help='File containing URLs to process')
+    args = parser.parse_args()
+
+    filename = args.filename
+
+    # 파일 존재 여부 확인
+    if not os.path.isfile(filename):
+        print(f"Error: The file '{filename}' does not exist.")
+        sys.exit(1)
+
+    # URL 목록 읽기
+    with open(filename, 'r', encoding='utf-8') as file:
+        urls = [line.strip() for line in file if line.strip()]
+
+    fetch_and_convert(urls)
