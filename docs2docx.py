@@ -22,10 +22,26 @@ def clean_text(text):
         return text.strip()
     return ""
 
+def add_table_of_contents(doc):
+    """문서의 맨 앞에 목차를 추가합니다."""
+    # 새로운 단락 생성
+    paragraph = doc.add_paragraph()
+    run = paragraph.add_run()
+    
+    # fldSimple 요소 생성
+    fldSimple = OxmlElement('w:fldSimple')
+    fldSimple.set(qn('w:instr'), 'TOC \\o "1-3" \\h \\z \\u')
+
+    # run 요소를 fldSimple에 추가
+    fldSimple.append(run._r)
+
+    # 문서의 가장 앞에 fldSimple 요소를 추가
+    doc.element.body.insert(0, fldSimple)
+
 def fetch_and_convert(urls):
     """주어진 URL 목록에서 내용을 가져와 Word 문서로 변환합니다."""
     doc = Document()
-    
+
     for url in urls:
         print(f"Processing {url}...")
         response = requests.get(url)
@@ -140,7 +156,6 @@ def parse_element(element, doc, parent_style=None):
                 href = child.get('href', '')
                 if text and href:
                     # 이전 텍스트와의 공백 처리
-                    print(text)
                     add_hyperlink(paragraph, text, href)
             else:
                 # 기타 요소 처리
