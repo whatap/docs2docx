@@ -1,7 +1,11 @@
 import requests
-from bs4 import BeautifulSoup, NavigableString, Tag
+from bs4 import BeautifulSoup, NavigableString
+from bs4.element import Tag  # Tag 클래스를 직접 임포트
+import docx  # 추가된 임포트
 from docx import Document
 from docx.shared import Inches
+from docx.oxml import OxmlElement  # 추가된 임포트
+from docx.oxml.ns import qn        # 추가된 임포트
 from io import BytesIO
 from PIL import Image as PILImage
 import re
@@ -43,7 +47,51 @@ def fetch_and_convert(urls):
 
     doc.save('output.docx')  # 최종 DOCX 파일 저장
 
-def parse_element(element, doc):
+def add_hyperlink(paragraph, text, url):
+    """단락에 하이퍼링크를 추가하고, 색상과 밑줄 스타일을 직접 설정합니다."""
+    # 하이퍼링크 URL 수정
+    if not url.startswith("http"):
+        myurl = "https://docs.whatap.io" + url
+    else:
+        myurl = url
+
+    # 하이퍼링크 ID를 생성합니다.
+    part = paragraph.part
+    r_id = part.relate_to(myurl, docx.opc.constants.RELATIONSHIP_TYPE.HYPERLINK, is_external=True)
+
+    # 하이퍼링크 XML 요소를 생성합니다.
+    hyperlink = OxmlElement('w:hyperlink')
+    hyperlink.set(qn('r:id'), r_id)
+
+    # 하이퍼링크에 포함될 텍스트 Run을 생성합니다.
+    new_run = OxmlElement('w:r')
+    rPr = OxmlElement('w:rPr')
+
+    # 밑줄 설정
+    u = OxmlElement('w:u')
+    u.set(qn('w:val'), 'single')
+    rPr.append(u)
+
+    # 색상 설정 (파란색)
+    color = OxmlElement('w:color')
+    color.set(qn('w:val'), '0000FF')
+    rPr.append(color)
+
+    # rPr을 run에 추가
+    new_run.append(rPr)
+
+    # 텍스트를 추가합니다.
+    text_elem = OxmlElement('w:t')
+    text_elem.text = text
+    new_run.append(text_elem)
+
+    # run을 하이퍼링크에 추가
+    hyperlink.append(new_run)
+
+    # 단락에 하이퍼링크를 추가합니다.
+    paragraph._p.append(hyperlink)
+
+def parse_element(element, doc, parent_style=None):
     """HTML 요소를 재귀적으로 순회하여 Word 문서에 추가합니다."""
     if isinstance(element, NavigableString):
         # 텍스트 노드 처리
@@ -71,11 +119,32 @@ def parse_element(element, doc):
     elif element.name == 'ul':
         # 리스트 처리
         for li in element.find_all('li', recursive=False):
-            parse_element(li, doc)
+            parse_element(li, doc, parent_style='ListBullet')
+    elif element.name == 'ol':
+        # 순서 있는 리스트 처리
+        for li in element.find_all('li', recursive=False):
+            parse_element(li, doc, parent_style='ListNumber')
     elif element.name == 'li':
-        li_text = clean_text(element.get_text(strip=True))
-        if li_text:
-            doc.add_paragraph(li_text, style='ListBullet')
+        # 리스트 아이템 처리
+        paragraph = doc.add_paragraph(style=parent_style or 'ListBullet')
+        for child in element.children:
+            if isinstance(child, NavigableString):
+                text = clean_text(str(child))
+                if text:
+                    paragraph.add_run(text)
+            elif child.name == 'p':
+                # li 안의 p 요소 처리
+                parse_p_element(child, paragraph)
+            elif child.name == 'a':
+                text = clean_text(child.get_text())
+                href = child.get('href', '')
+                if text and href:
+                    # 이전 텍스트와의 공백 처리
+                    print(text)
+                    add_hyperlink(paragraph, text, href)
+            else:
+                # 기타 요소 처리
+                parse_element(child, doc)
     elif element.name == 'table':
         # 테이블 처리
         process_table(element, doc)
@@ -114,18 +183,20 @@ def parse_p_element(element, paragraph):
             if text:
                 # 이전 텍스트와의 공백 처리
                 if paragraph.text and not paragraph.text.endswith(' '):
-                    text = ' ' + text
+                    paragraph.add_run(' ')
                 paragraph.add_run(text)
         elif child.name == 'a':
             text = clean_text(child.get_text())
             href = child.get('href', '')
-            if text:
+            if text and href:
                 # 이전 텍스트와의 공백 처리
                 if paragraph.text and not paragraph.text.endswith(' '):
-                    text = ' ' + text
-                run = paragraph.add_run(text)
-                # 하이퍼링크 스타일 적용 가능
-                # 하이퍼링크 기능을 구현하려면 추가 작업이 필요합니다.
+                    paragraph.add_run(' ')
+                # 하이퍼링크 추가
+                add_hyperlink(paragraph, text, href)
+            else:
+                # 하이퍼링크가 없으면 텍스트만 추가
+                paragraph.add_run(text)
         elif child.name == 'img':
             # 이미지 처리
             process_image(child, paragraph)
@@ -150,14 +221,19 @@ def process_image(element, container):
             img = PILImage.open(BytesIO(img_data))
             img.save("temp_image.png")
 
-            if isinstance(container, Document):
+            # container의 타입에 따라 이미지 추가 방법 결정
+            if hasattr(container, 'add_picture'):
+                # Document 또는 Paragraph 객체
                 container.add_picture("temp_image.png", width=Inches(5))
-            elif isinstance(container, Tag):
-                # 테이블 셀 내 이미지 처리 시
-                pass  # 테이블 셀 내 이미지 처리는 아래에서 처리됨
-            else:
-                # Paragraph 또는 Run에 이미지 추가
+            elif hasattr(container, 'add_run'):
+                # Paragraph 객체
                 container.add_run().add_picture("temp_image.png", width=Inches(5))
+            elif hasattr(container, 'paragraphs'):
+                # TableCell 객체
+                paragraph = container.paragraphs[0]
+                paragraph.add_run().add_picture("temp_image.png", width=Inches(1))
+            else:
+                print(f"Unknown container type: {type(container)}")
             os.remove("temp_image.png")
         except Exception as e:
             print(f"Failed to load image {img_src}: {e}")
@@ -242,25 +318,7 @@ def parse_table_cell(cell_element, table_cell):
                 paragraph.add_run(text)
         elif child.name == 'img':
             # 이미지 처리
-            img_src = child.get('src')
-            if img_src:
-                try:
-                    if img_src.startswith('data:image'):
-                        # Base64로 인코딩된 이미지 처리
-                        header, encoded = img_src.split(',', 1)
-                        img_data = base64.b64decode(encoded)
-                    else:
-                        if not img_src.startswith('http'):
-                            img_src = 'https://docs.whatap.io' + img_src
-                        img_data = requests.get(img_src).content
-
-                    img = PILImage.open(BytesIO(img_data))
-                    img.save("temp_table_image.png")
-                    run = paragraph.add_run()
-                    run.add_picture("temp_table_image.png", width=Inches(1))
-                    os.remove("temp_table_image.png")
-                except Exception as e:
-                    print(f"Failed to load image {img_src}: {e}")
+            process_image(child, table_cell)
         elif child.name == 'br':
             paragraph.add_run('\n')
         else:
