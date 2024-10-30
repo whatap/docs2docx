@@ -2,12 +2,11 @@ import requests
 from bs4 import BeautifulSoup, NavigableString, Tag
 from docx import Document
 from docx.shared import Inches
-from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
 from io import BytesIO
 from PIL import Image as PILImage
 import re
 import os
+import base64
 
 def clean_text(text):
     """주어진 텍스트에서 특수 문자를 제거하고 원하는 문자열로 치환합니다."""
@@ -101,18 +100,7 @@ def parse_element(element, doc):
                     parse_element(child, doc)
     elif element.name == 'img':
         # 이미지 처리
-        img_src = element.get('src')
-        if img_src:
-            if not img_src.startswith('http'):
-                img_src = 'https://docs.whatap.io' + img_src
-            try:
-                img_data = requests.get(img_src).content
-                img = PILImage.open(BytesIO(img_data))
-                img.save("temp_image.png")
-                doc.add_picture("temp_image.png", width=Inches(5))
-                os.remove("temp_image.png")
-            except Exception as e:
-                print(f"Failed to load image {img_src}: {e}")
+        process_image(element, doc)
     else:
         # 기타 요소의 경우 하위 요소를 재귀적으로 처리
         for child in element.children:
@@ -138,9 +126,41 @@ def parse_p_element(element, paragraph):
                 run = paragraph.add_run(text)
                 # 하이퍼링크 스타일 적용 가능
                 # 하이퍼링크 기능을 구현하려면 추가 작업이 필요합니다.
+        elif child.name == 'img':
+            # 이미지 처리
+            process_image(child, paragraph)
         else:
             # 다른 태그가 있을 경우 재귀적으로 처리
             parse_p_element(child, paragraph)
+
+def process_image(element, container):
+    """이미지 요소를 처리하여 문서에 추가합니다."""
+    img_src = element.get('src')
+    if img_src:
+        try:
+            if img_src.startswith('data:image'):
+                # Base64로 인코딩된 이미지 처리
+                header, encoded = img_src.split(',', 1)
+                img_data = base64.b64decode(encoded)
+            else:
+                if not img_src.startswith('http'):
+                    img_src = 'https://docs.whatap.io' + img_src
+                img_data = requests.get(img_src).content
+
+            img = PILImage.open(BytesIO(img_data))
+            img.save("temp_image.png")
+
+            if isinstance(container, Document):
+                container.add_picture("temp_image.png", width=Inches(5))
+            elif isinstance(container, Tag):
+                # 테이블 셀 내 이미지 처리 시
+                pass  # 테이블 셀 내 이미지 처리는 아래에서 처리됨
+            else:
+                # Paragraph 또는 Run에 이미지 추가
+                container.add_run().add_picture("temp_image.png", width=Inches(5))
+            os.remove("temp_image.png")
+        except Exception as e:
+            print(f"Failed to load image {img_src}: {e}")
 
 def process_table(table_element, doc):
     """HTML 테이블 요소를 Word 문서에 추가합니다."""
@@ -221,12 +241,19 @@ def parse_table_cell(cell_element, table_cell):
             if text:
                 paragraph.add_run(text)
         elif child.name == 'img':
+            # 이미지 처리
             img_src = child.get('src')
             if img_src:
-                if not img_src.startswith('http'):
-                    img_src = 'https://docs.whatap.io' + img_src
                 try:
-                    img_data = requests.get(img_src).content
+                    if img_src.startswith('data:image'):
+                        # Base64로 인코딩된 이미지 처리
+                        header, encoded = img_src.split(',', 1)
+                        img_data = base64.b64decode(encoded)
+                    else:
+                        if not img_src.startswith('http'):
+                            img_src = 'https://docs.whatap.io' + img_src
+                        img_data = requests.get(img_src).content
+
                     img = PILImage.open(BytesIO(img_data))
                     img.save("temp_table_image.png")
                     run = paragraph.add_run()
