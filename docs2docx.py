@@ -1,18 +1,19 @@
 import requests
 from bs4 import BeautifulSoup, NavigableString
-from bs4.element import Tag  # Tag 클래스를 직접 임포트
+from bs4.element import Tag
 import docx
 from docx import Document
-from docx.shared import Inches
-from docx.oxml import OxmlElement  # 추가된 임포트
-from docx.oxml.ns import qn        # 추가된 임포트
+from docx.shared import Inches, Pt
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 from io import BytesIO
 from PIL import Image as PILImage
 import re
 import os
 import base64
 import sys
-import argparse  # 추가된 임포트
+import argparse
+from docx.enum.style import WD_STYLE_TYPE
 
 def clean_text(text):
     """주어진 텍스트에서 특수 문자를 제거하고 원하는 문자열로 치환합니다."""
@@ -40,9 +41,26 @@ def add_table_of_contents(doc):
     # 문서의 가장 앞에 fldSimple 요소를 추가
     doc.element.body.insert(0, fldSimple)
 
+def create_code_style(doc):
+    """문서에 코드 블록 스타일을 생성합니다."""
+    styles = doc.styles
+    if 'Code' not in styles:
+        style = styles.add_style('Code', WD_STYLE_TYPE.PARAGRAPH)
+        style.font.name = 'Consolas'
+        style.font.size = Pt(10)
+        style.paragraph_format.left_indent = Inches(0.5)
+        style.paragraph_format.right_indent = Inches(0.5)
+        style.paragraph_format.space_before = Pt(6)
+        style.paragraph_format.space_after = Pt(6)
+        style.paragraph_format.line_spacing = 1
+        shading_elm = OxmlElement('w:shd')
+        shading_elm.set(qn('w:fill'), 'EDEDED')  # 배경색 설정
+        style.paragraph_format.element.get_or_add_pPr().append(shading_elm)
+
 def fetch_and_convert(urls):
     """주어진 URL 목록에서 내용을 가져와 Word 문서로 변환합니다."""
     doc = Document()
+    create_code_style(doc)  # 코드 스타일 생성
 
     for url in urls:
         print(f"Processing {url}...")
@@ -122,6 +140,10 @@ def parse_element(element, doc, parent_style=None):
                 doc.add_paragraph(text)
         return
 
+    # `<article>` 요소 중 클래스에 `margin-bottom--lg`가 포함된 경우 제외
+    if element.name == 'article' and 'margin-bottom--lg' in element.get('class', []):
+        return
+
     if element.name == 'hr':
         # hr 요소는 처리하지 않고 건너뜁니다.
         return
@@ -187,6 +209,9 @@ def parse_element(element, doc, parent_style=None):
     elif element.name == 'img':
         # 이미지 처리
         process_image(element, doc)
+    elif element.name == 'div' and 'theme-code-block' in element.get('class', []):
+        # 코드 블록 처리
+        process_code_block(element, doc)
     else:
         # 기타 요소의 경우 하위 요소를 재귀적으로 처리
         for child in element.children:
@@ -220,6 +245,16 @@ def parse_p_element(element, paragraph):
         else:
             # 다른 태그가 있을 경우 재귀적으로 처리
             parse_p_element(child, paragraph)
+
+def process_code_block(element, doc):
+    """코드 블록 요소를 처리하여 문서에 추가합니다."""
+    pre_element = element.find('pre')
+    if pre_element:
+        code_text = pre_element.get_text()
+        if code_text:
+            # 코드 블록을 문서에 추가
+            paragraph = doc.add_paragraph(style='Code')
+            paragraph.add_run(code_text)
 
 def process_image(element, container):
     """이미지 요소를 처리하여 문서에 추가합니다."""
@@ -360,12 +395,6 @@ def merge_cell(table, row_idx, col_idx, rowspan, colspan):
 
     end_cell = table.cell(end_row, end_col)
     start_cell.merge(end_cell)
-
-# URL 목록 읽기
-# with open('urls.txt', 'r') as file:
-#     urls = [line.strip() for line in file if line.strip()]
-
-# fetch_and_convert(urls)  # 함수 호출
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Fetch URLs from a file and convert to Word document.')
