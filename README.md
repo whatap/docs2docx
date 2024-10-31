@@ -15,3 +15,9 @@ chmod +x ./docs2docx
 ```
 
 문서 변환에 문제가 있거나 누락되는 사항이 있을 수 있습니다. 기획그룹 TW 임기정에게 문의주세요.
+
+## 컴파일
+
+```
+pyinstaller --onefile docs2docx.py
+```
