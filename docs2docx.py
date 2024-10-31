@@ -175,6 +175,14 @@ def parse_element(element, doc, parent_style=None):
             elif child.name == 'p':
                 # li 안의 p 요소 처리
                 parse_p_element(child, paragraph)
+            elif child.name == 'strong':
+                # Bold text for <strong> tags
+                text = clean_text(child.get_text())
+                if text:
+                    # 이전 텍스트와의 공백 처리
+                    if paragraph.text and not paragraph.text.endswith(' '):
+                        paragraph.add_run(' ')
+                    paragraph.add_run(text).bold = True
             elif child.name == 'a':
                 text = clean_text(child.get_text())
                 href = child.get('href', '')
@@ -227,6 +235,14 @@ def parse_p_element(element, paragraph):
                 if paragraph.text and not paragraph.text.endswith(' '):
                     paragraph.add_run(' ')
                 paragraph.add_run(text)
+        elif child.name == 'strong':
+            # Bold text for <strong> tags
+            text = clean_text(child.get_text())
+            if text:
+                # 이전 텍스트와의 공백 처리
+                if paragraph.text and not paragraph.text.endswith(' '):
+                    paragraph.add_run(' ')
+                paragraph.add_run(text).bold = True
         elif child.name == 'a':
             text = clean_text(child.get_text())
             href = child.get('href', '')
@@ -239,6 +255,18 @@ def parse_p_element(element, paragraph):
             else:
                 # 하이퍼링크가 없으면 텍스트만 추가
                 paragraph.add_run(text)
+        elif child.name == 'span' and 'uitext' in child.get('class', []):
+            # Apply blue color for <span class="uitext"> elements
+            text = clean_text(child.get_text())
+            if text:
+                # 이전 텍스트와의 공백 처리
+                if paragraph.text and not paragraph.text.endswith(' '):
+                    paragraph.add_run(' ')
+                run = paragraph.add_run(text)
+                rPr = run._element.get_or_add_rPr()
+                color = OxmlElement('w:color')
+                color.set(qn('w:val'), '0000FF')
+                rPr.append(color)
         elif child.name == 'img':
             # 이미지 처리
             process_image(child, paragraph)
@@ -368,6 +396,18 @@ def parse_table_cell(cell_element, table_cell):
             text = clean_text(str(child))
             if text:
                 paragraph.add_run(text)
+        elif child.name == 'span' and 'uitext' in child.get('class', []):
+            # Apply blue color for <span class="uitext"> elements
+            text = clean_text(child.get_text())
+            if text:
+                # 이전 텍스트와의 공백 처리
+                if paragraph.text and not paragraph.text.endswith(' '):
+                    paragraph.add_run(' ')
+                run = paragraph.add_run(text)
+                rPr = run._element.get_or_add_rPr()
+                color = OxmlElement('w:color')
+                color.set(qn('w:val'), '0000FF')
+                rPr.append(color)
         elif child.name == 'img':
             # 이미지 처리
             process_image(child, table_cell)
