@@ -131,7 +131,7 @@ virtualenv==20.27.1
 w3lib==2.2.1
 watchdog==4.0.0
 websockets==12.0
-Werkzeug==3.0.2
+Werkzeug==3.0.6
 xattr==1.1.0
 zipp==3.20.2
 zope.interface==7.1.0
